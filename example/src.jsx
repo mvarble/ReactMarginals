@@ -1,6 +1,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom';
-import { MarginalsInteractive } from '../src.jsx';
+// comment out next line if we want live updates
+import { MarginalsInteractive } from '@mvarble/react-marginals';
+// comment out next line if we want to test build
+// import { MarginalsInteractive } from '../src';
 import data from './data.json'
 
 

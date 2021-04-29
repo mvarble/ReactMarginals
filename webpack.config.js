@@ -1,5 +1,5 @@
 module.exports = {
-  mode: 'development',
+  mode: 'production',
   entry: './src.jsx',
   output: {
     path: __dirname,
@@ -16,4 +16,5 @@ module.exports = {
       },
     }],
   },
+  externals: { react: 'react', d3: 'd3' },
 };
