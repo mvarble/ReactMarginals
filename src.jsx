@@ -9,6 +9,7 @@ import {
 } from 'd3';
 
 export { 
+  MarginalsInteractive,
   Marginals,
   Marginal1D,
   Marginal2D,
@@ -20,10 +21,113 @@ export {
 
 export default Marginals;
 
+const testArrays = (arrays, d) => (
+  Array.isArray(arrays) &&
+  arrays.length === d &&
+  arrays.every(
+    (a, i) => Array.isArray(a) && a.length === i + 1 
+  )
+);
+
+const parseClick = e => (
+  e.target.nodeName === "svg"
+  ? e.target.attributes.name.nodeValue
+  : (e.target.viewportElement
+    ? e.target.viewportElement.attributes.name.nodeValue
+    : undefined
+  )
+);
+
 /**
  * Our react components
  */
-function Marginals({ data, labels, svgProps }) {
+function MarginalsInteractive({ data, labels, svgProps, bandwidths, bandwidth }) {
+  // get the dimension each time the data changes
+  const d = React.useMemo(() => {
+    if (!Array.isArray(data) || !data.length) return 0
+    else return data[0].length;
+  }, [data]);
+
+  // create state for bandwidths
+  const [bandwidthsFix, setBandwidths] = React.useState(
+    testArrays(bandwidths, d)
+    ? bandwidths
+    : Array(d).fill().map((_, i) => Array(i+1).fill(bandwidth || 5.0))
+  );
+
+  // create state for selected
+  const [selected, setSelected] = React.useState(undefined);
+  const onClick = React.useCallback(e => {
+    const pair = parseClick(e);
+    if (!pair) return;
+    else setSelected(pair);
+  }, [setSelected]);
+
+  // parse if something is selected
+  const pair = selected && selected.match(/[0-9]+/g).map(k => parseInt(k));
+
+  // get the react component for the view
+  const view = React.useMemo(() => {
+    if (!pair) return null;
+    const [row, col] = pair;
+    return (
+      row === col
+      ? <Marginal1D 
+          data={ data.map(v => v[row]) } 
+          bandwidth={ bandwidthsFix[row][col] }
+          { ...{ 
+            width: 100 * d, 
+            height: 100 * d, 
+            strokeWidth: 0.5,
+            ...(svgProps || {}) 
+          } } />
+      : <Marginal2D
+          data={ data.map(v => [v[col], v[row]]) } 
+          bandwidth={ bandwidthsFix[row][col] }
+          { ...{ 
+            width: 100 * d, 
+            height: 100 * d, 
+            strokeWidth: 0.5,
+            ...(svgProps || {}) 
+          } } />
+    );
+  }, [pair, bandwidthsFix, data]);
+
+  // create the bandwidth input
+  const input = React.useMemo(() => {
+    if (!pair) return null;
+    const [row, col] = pair;
+    return (
+      <input 
+        placeholder="bandwidth" 
+        value={ bandwidthsFix[row][col] }
+        onChange={ e => {
+          const value = e.target.value;
+          setBandwidths(bbs => 
+            bbs.map((bs, r) => 
+              r === row ? bs.map((b, c) => c === col ? value : b) : bs
+            )
+          );
+        }}
+      />
+    );
+  }, [pair, bandwidthsFix, setBandwidths]);
+
+  return (
+    <div>
+      <Marginals 
+        data={ data } 
+        labels={ labels } 
+        svgProps={ { ...(svgProps || {}), onClick } }
+        bandwidths={ bandwidthsFix } 
+        selection={ selected }/>
+      { view }
+      { input }
+    </div>
+  );
+}
+
+function Marginals({ data, labels, svgProps, bandwidths, bandwidth, selection }) {
   // memoize the lists of marginals
   const { d, marginals } = React.useMemo(() => {
     if (!Array.isArray(data) || !data.length) {
@@ -42,9 +146,16 @@ function Marginals({ data, labels, svgProps }) {
 
   // create labels if nonexistant
   const labelsFix = (
-    (!Array.isArray(labels) || labels.length !== d)
-    ? Array(d).fill().map((_, i) => `x${i}`)
-    : labels
+    Array.isArray(labels) && labels.length === d
+    ? labels 
+    : Array(d).fill().map((_, i) => `x${i}`)
+  );
+
+  // create bandwidths of nonexistant
+  const bandwidthsFix = (
+    testArrays(bandwidths, d) 
+    ? bandwidths
+    : Array(d).fill().map((_, i) => Array(i+1).fill(bandwidth || 5.0))
   );
 
   // render marginals in table
@@ -62,10 +173,24 @@ function Marginals({ data, labels, svgProps }) {
                       row === col 
                       ? <Marginal1D 
                         data={ data } 
-                        { ...{ width: 100, height: 100, ...(svgProps || {}) } } />
+                        bandwidth={ bandwidthsFix[row][col] }
+                        selected={ selection === `(${row},${col})` }
+                        { ...{ 
+                          width: 100, 
+                          height: 100, 
+                          name: `(${row},${col})`,
+                          ...(svgProps || {}) 
+                        } } />
                       : <Marginal2D
                         data={ data } 
-                        { ...{ width: 100, height: 100, ...(svgProps || {}) } } />
+                        bandwidth={ bandwidthsFix[row][col] }
+                        selected={ selection === `(${row},${col})` }
+                        { ...{ 
+                          width: 100, 
+                          height: 100, 
+                          name: `(${row},${col})`,
+                          ...(svgProps || {}) 
+                        } } />
                     }
                   </td>
                 ) 
@@ -86,32 +211,35 @@ function Marginals({ data, labels, svgProps }) {
   );
 }
 
-const SVG = React.forwardRef(({ style, children, ...props }, ref) => (
+const SVG = React.forwardRef(({ style, children, selected, ...props }, ref) => (
   <svg 
     { ...props }
-    style={{ border: '1px solid black', ...(style || {}) }}
+    style={{ 
+      border: selected ? '1px solid red' : '1px solid black', 
+      ...(style || {}) 
+    }}
     ref={ ref }
     viewBox="0 0 100 100">
     { children }
   </svg>
 ));
 
-function Marginal1D({ data, ...props }) {
+function Marginal1D({ data, bandwidth, ...props }) {
   // use d3 to create line on data change
   const d = React.useMemo(() => { 
-    return kernelDensity({ bandwidth: 3.0, stepSize: 1.0 })(data); // TODO make bandwidth depend on data
-  }, [data]);
+    return kernelDensity({ bandwidth: bandwidth || 5.0, stepSize: 1.0 })(data);
+  }, [bandwidth, data]);
   
   // render
   return <SVG { ...props }><path d={ d } fill="none" stroke={ interpolateYlGnBu(1.0) } /></SVG>;
 }
 
-function Marginal2D({ data, ...props }) {
+function Marginal2D({ data, bandwidth, ...props }) {
   // create a ref for D3
   const ref = React.useRef();
 
   // call d3 update on data change
-  React.useEffect(() => {
+ React.useEffect(() => {
     // parse the bounds of the data
     const { xMin, xMax, yMin, yMax } = data.reduce((o, [x, y]) => ({
       xMin: Math.min(x, o.xMin),
@@ -126,7 +254,7 @@ function Marginal2D({ data, ...props }) {
 
     // create the density estimator
     const density = contourDensity()
-      .bandwidth(4.0) // TODO: data dependence
+      .bandwidth(bandwidth || 5.0)
       .x(d => scaleX(d[0]))
       .y(d => scaleY(d[1]));
 
@@ -137,9 +265,8 @@ function Marginal2D({ data, ...props }) {
       .join('path')
         .attr('fill', 'none')
         .attr('stroke', (_, i, l) => interpolateYlGnBu(1 - 0.75 * i / l.length))
-        .attr('stroke-width', 1)
         .attr('d', geoPath())
-  }, [data, ref]);
+  }, [bandwidth, data, ref]);
   
   // render
   return <SVG { ...props } ref={ ref } />;
